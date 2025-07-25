@@ -8,31 +8,31 @@ import os
 rtsp_url = r"rtsp://36.92.47.218:7430/video1" 
 detectconf_threshold = 0.5 
 
+# Path ke model YOLO yang akan digunakan (yolo11l.pt)
+# Pastikan path ini benar di sistem Anda (Windows atau Linux/Jetson)
 yolo_model = r'C:\Users\lapt1\Downloads\testing all\yolo11l.pt' 
+# Untuk Jetson: yolo_model = r'/home/jetson/your_models/yolo11l.pt'
 
-param_box_x_min = 1000
-param_box_y_min = 280
-param_box_x_max = 2000
-param_box_y_max = 1200
+# Bounding box parameter (dihapus dari logika deteksi, hanya tersisa sebagai variabel kosong atau komentar)
+# param_box_x_min = 1000
+# param_box_y_min = 280
+# param_box_x_max = 2000
+# param_box_y_max = 1200
 
-def intersect(box1, box2):
-    """
-    Mengecek apakah dua bounding box berpotongan.
-    box format: [x_min, y_min, x_max, y_max]
-    """
-    x1_min, y1_min, x1_max, y1_max = box1
-    x2_min, y2_min, x2_max, y2_max = box2
-    
-    inter_x_min = max(x1_min, x2_min)
-    inter_y_min = max(y1_min, y2_min)
-    inter_x_max = min(x1_max, x2_max)
-    inter_y_max = min(y1_max, y2_max)
-    
-    return inter_x_max > inter_x_min and inter_y_max > inter_y_min
+# Fungsi intersect tidak lagi diperlukan karena tidak ada pembatasan area
+# def intersect(box1, box2):
+#     x1_min, y1_min, x1_max, y1_max = box1
+#     x2_min, y2_min, x2_max, y2_max = box2
+#     inter_x_min = max(x1_min, x2_min)
+#     inter_y_min = max(y1_min, y2_min)
+#     inter_x_max = min(x1_max, x2_max)
+#     inter_y_max = min(y1_max, y2_max)
+#     return inter_x_max > inter_x_min and inter_y_max > inter_y_min
 
 ## Main Application Logic
 def run_rtsp_detection():
-    print("Memuat model YOLO (all classes)...")
+    print("Memuat model YOLO...")
+    # Model ini (yolo11l.pt) seharusnya sudah bisa mendeteksi 'person'
     model = YOLO(yolo_model)
     print("Model YOLO berhasil dimuat.")
 
@@ -44,13 +44,14 @@ def run_rtsp_detection():
     print("\nNama kelas yang dikenal model:")
     print(model.names)
 
+    # Dapatkan ID kelas 'person' dari model yang dimuat
     try:
         PERSON_CLASS_ID = list(model.names.keys())[list(model.names.values()).index('person')]
         print(f"Class ID untuk 'person' adalah: {PERSON_CLASS_ID}")
     except ValueError:
         print("Error: 'person' class not found in the loaded YOLO model's names.")
         print("Pastikan model yang digunakan mendukung deteksi 'person'.")
-        return 
+        return # Keluar jika 'person' tidak ditemukan
 
     cap = cv2.VideoCapture(rtsp_url)
 
@@ -85,12 +86,15 @@ def run_rtsp_detection():
 
             display_frame = frame.copy() 
 
+            # Inferensi YOLO untuk mendeteksi semua kelas
+            # Kemudian kita akan memfilter hasilnya hanya untuk 'person'
             results = model(
                 frame, 
                 stream=True, 
                 device=device, 
                 verbose=False, 
                 conf=detectconf_threshold,
+                # imgsz=640 # Anda bisa tambahkan ini jika ingin ukuran inferensi spesifik
             )
 
             for r in results:
@@ -98,6 +102,8 @@ def run_rtsp_detection():
                 classes_tensor = r.boxes.cls
                 confidences_tensor = r.boxes.conf
 
+                # Pindahkan ke CPU dan konversi ke NumPy hanya sekali setelah loop
+                # agar lebih efisien jika ada banyak deteksi
                 boxes = boxes_tensor.cpu().numpy()
                 classes = classes_tensor.cpu().numpy()
                 confidences = confidences_tensor.cpu().numpy()
@@ -107,20 +113,17 @@ def run_rtsp_detection():
                     conf = confidences[i]
                     x1, y1, x2, y2 = map(int, box)
 
-                    is_inside_param_box = intersect([x1, y1, x2, y2], [param_box_x_min, param_box_y_min, param_box_x_max, param_box_y_max])
-                    
-                    if is_inside_param_box:
-                        if cls_id == PERSON_CLASS_ID:
-                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                            cv2.putText(display_frame, f"{model.names[cls_id]} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                    else:
-                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2) 
-                        cv2.putText(display_frame, f"{model.names[cls_id]} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                    # Hanya gambar bounding box jika kelasnya adalah 'person'
+                    if cls_id == PERSON_CLASS_ID:
+                        # Gambar kotak hijau untuk deteksi orang
+                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2) 
+                        cv2.putText(display_frame, f"{model.names[cls_id]} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            cv2.rectangle(display_frame, (param_box_x_min, param_box_y_min), (param_box_x_max, param_box_y_max), (255, 0, 0), 2) # Biru
-            cv2.putText(display_frame, "Capture Zone", (param_box_x_min, param_box_y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+            # Tidak ada lagi bounding box parameter yang digambar
+            # cv2.rectangle(display_frame, (param_box_x_min, param_box_y_min), (param_box_x_max, param_box_y_max), (255, 0, 0), 2) 
+            # cv2.putText(display_frame, "Capture Zone", (param_box_x_min, param_box_y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-            cv2.imshow("RTSP Stream - Single YOLO Dual Focus", display_frame)
+            cv2.imshow("RTSP Stream - Person Detector", display_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 print("Tombol 'q' ditekan. Menghentikan aplikasi.")
