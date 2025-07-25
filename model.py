@@ -5,10 +5,9 @@ import os
 import time
 import shutil
 
-# --- Konfigurasi Umum ---
 dataset = r'/home/jetson/your_project/ppe-dataset/data.yaml' 
 
-yolo_model = 'yolo11m.pt' 
+yolo_model = 'yolo11n.pt' 
 
 tensorrt_output = 'best.engine' 
 
@@ -23,7 +22,6 @@ def run_fine_tuning_and_export():
         print("CUDA Not Available")
         print("Error Convert to TensorRT")
 
-    # 1. Muat Model Dasar YOLO
     print(f"\nLoading model '{yolo_model}'...")
     try:
         model = YOLO(yolo_model)
@@ -44,14 +42,13 @@ def run_fine_tuning_and_export():
         print(f"Error read '{dataset}': {e}")
         return
 
-    # 3. Jalankan Proses Fine-tuning
     print("\n--- Fine Tuning Process ---")
     try:
         results = model.train(
             data=dataset,  
-            epochs=50,         
+            epochs=100,         
             imgsz=640,           
-            batch=8,      
+            batch=4,      
             device=device,          
             patience=10,   
             lr0=0.01,              
