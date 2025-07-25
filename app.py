@@ -8,8 +8,7 @@ import os
 rtsp_url = "rtsp://36.92.47.218:7430/video4" 
 detectconf_threshold = 0.5 
 
-yolo_person_model = r'/home/jetson/people.pt' 
-yolo_all_model = r'/home/jetson/yolo11m.pt' 
+yolo_model = r'/home/jetson/yolo11m.pt' 
 
 param_box_x_min = 1000
 param_box_y_min = 280
@@ -33,33 +32,26 @@ def intersect(box1, box2):
 
 ## Main Application Logic
 def run_rtsp_detection():
-    # Muat Model
-    print("Memuat model 'person'...")
-    model_person = YOLO(yolo_person_model)
-    print("Model 'person' berhasil dimuat.")
+    print("Memuat model YOLO (all classes)...")
+    model = YOLO(yolo_model)
+    print("Model YOLO berhasil dimuat.")
 
-    print("Memuat model 'all classes'...")
-    model_all_classes = YOLO(yolo_all_model)
-    print("Model 'all classes' berhasil dimuat.")
-
-    # Cek ketersediaan CUDA/GPU di Jetson
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Menggunakan device: **{device}**")
     if device == 'cuda':
         print(f"CUDA tersedia. Nama GPU: **{torch.cuda.get_device_name(0)}**")
 
-    print("\nNama kelas yang dikenal model 'person':")
-    print(model_person.names)
-    print("\nNama kelas yang dikenal model 'all classes':")
-    print(model_all_classes.names)
+    print("\nNama kelas yang dikenal model:")
+    print(model.names)
 
     try:
-        PERSON_CLASS_ID = list(model_person.names.keys())[list(model_person.names.values()).index('people')]
+        PERSON_CLASS_ID = list(model.names.keys())[list(model.names.values()).index('person')]
+        print(f"Class ID untuk 'person' adalah: {PERSON_CLASS_ID}")
     except ValueError:
-        print("Warning: 'person' class not found in model_person.names. Assuming class ID 0.")
-        PERSON_CLASS_ID = 0 
-    
-    # Inisialisasi Video Capture
+        print("Error: 'person' class not found in the loaded YOLO model's names.")
+        print("Pastikan model yang digunakan mendukung deteksi 'person'.")
+        return 
+
     cap = cv2.VideoCapture(rtsp_url)
 
     if not cap.isOpened():
@@ -93,7 +85,7 @@ def run_rtsp_detection():
 
             display_frame = frame.copy() 
 
-            results_person = model_person(
+            results = model(
                 frame, 
                 stream=True, 
                 device=device, 
@@ -101,7 +93,7 @@ def run_rtsp_detection():
                 conf=detectconf_threshold,
             )
 
-            for r in results_person:
+            for r in results:
                 boxes_tensor = r.boxes.xyxy 
                 classes_tensor = r.boxes.cls
                 confidences_tensor = r.boxes.conf
@@ -115,42 +107,20 @@ def run_rtsp_detection():
                     conf = confidences[i]
                     x1, y1, x2, y2 = map(int, box)
 
-                    if model_person.names[cls_id] == 'person' and \
-                       intersect([x1, y1, x2, y2], [param_box_x_min, param_box_y_min, param_box_x_max, param_box_y_max]):
-                        
-                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(display_frame, f"{model_person.names[cls_id]} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-            results_all_classes = model_all_classes(
-                frame, 
-                stream=True, 
-                device=device, 
-                verbose=False, 
-                conf=detectconf_threshold,
-            )
-
-            for r in results_all_classes:
-                boxes_tensor = r.boxes.xyxy
-                classes_tensor = r.boxes.cls
-                confidences_tensor = r.boxes.conf
-
-                boxes = boxes_tensor.cpu().numpy()
-                classes = classes_tensor.cpu().numpy()
-                confidences = confidences_tensor.cpu().numpy()
-
-                for i, box in enumerate(boxes):
-                    cls_id = int(classes[i])
-                    conf = confidences[i]
-                    x1, y1, x2, y2 = map(int, box)
-
-                    if not intersect([x1, y1, x2, y2], [param_box_x_min, param_box_y_min, param_box_x_max, param_box_y_max]):
-                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                        cv2.putText(display_frame, f"{model_all_classes.names[cls_id]} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                    is_inside_param_box = intersect([x1, y1, x2, y2], [param_box_x_min, param_box_y_min, param_box_x_max, param_box_y_max])
+                    
+                    if is_inside_param_box:
+                        if cls_id == PERSON_CLASS_ID:
+                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            cv2.putText(display_frame, f"{model.names[cls_id]} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    else:
+                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2) 
+                        cv2.putText(display_frame, f"{model.names[cls_id]} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
             cv2.rectangle(display_frame, (param_box_x_min, param_box_y_min), (param_box_x_max, param_box_y_max), (255, 0, 0), 2) # Biru
             cv2.putText(display_frame, "Capture Zone", (param_box_x_min, param_box_y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-            cv2.imshow("RTSP Stream - Dual Detector", display_frame)
+            cv2.imshow("RTSP Stream - Single YOLO Dual Focus", display_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 print("Tombol 'q' ditekan. Menghentikan aplikasi.")
